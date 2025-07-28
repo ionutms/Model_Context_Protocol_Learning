@@ -637,29 +637,15 @@ def apply_docstrings_batch(docstrings_json: str) -> str:
             lines = code.split("\n")
             insertions = []
 
-            # Handle module docstring
+            # Handle module docstring - insert at the very top
             if "module" in docstrings:
                 module_docstring = docstrings["module"]
                 docstring_lines = module_docstring.split("\n")
 
+                # Insert at line 0 (top of file)
                 insert_line = 0
-                for i, line in enumerate(lines):
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith((
-                        "#",
-                        "import ",
-                        "from ",
-                    )):
-                        continue
-                    insert_line = i
-                    break
 
-                # Add empty line before docstring if needed
-                if insert_line > 0 and lines[insert_line - 1].strip():
-                    insertions.append({"line": insert_line, "content": [""]})
-                    insert_line += 1
-
-                # Add module docstring
+                # Add module docstring at the top
                 indented_docstring = [line for line in docstring_lines]
                 insertions.append({
                     "line": insert_line,
