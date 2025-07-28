@@ -20,6 +20,53 @@ def ensure_directories_exist():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
+def extract_module_info(tree: ast.AST, code: str) -> dict:
+    """Extract module-level information for docstring generation."""
+    lines = code.split("\n")
+    module_info = {
+        "imports": [],
+        "classes": [],
+        "functions": [],
+        "constants": [],
+        "first_code_lines": [],
+    }
+
+    # Get first few non-import lines for context
+    non_import_lines = []
+    for line in lines[:10]:
+        stripped = line.strip()
+        if stripped and not stripped.startswith(("import ", "from ", "#")):
+            non_import_lines.append(stripped)
+            if len(non_import_lines) >= 3:
+                break
+    module_info["first_code_lines"] = non_import_lines
+
+    # Extract top-level elements
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_info["imports"].append(alias.name)
+            else:
+                module_info["imports"].append(
+                    f"{node.module or ''}."
+                    f"{node.names[0].name if node.names else ''}"
+                )
+
+        elif isinstance(node, ast.ClassDef):
+            module_info["classes"].append(node.name)
+
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            module_info["functions"].append(node.name)
+
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.isupper():
+                    module_info["constants"].append(target.id)
+
+    return module_info
+
+
 def remove_docstrings_and_comments(code: str) -> str:
     """Remove all docstrings and comments from Python code."""
     tree = ast.parse(code)
@@ -345,11 +392,11 @@ def list_processed_files() -> str:
 
 @mcp.tool()
 def extract_signatures_batch() -> str:
-    """Extract all function/class signatures from processed files.
+    """Extract all function/class signatures and module info from files.
 
     This function analyzes all processed Python files and extracts minimal
-    context needed for docstring generation: signatures, type hints, and first
-    line of code.
+    context needed for docstring generation: signatures, type hints, first
+    line of code, and module-level information.
     This data is optimized for token efficiency when sent to LLM.
 
     Returns:
@@ -372,80 +419,172 @@ def extract_signatures_batch() -> str:
 
             tree = ast.parse(code)
             lines = code.split("\n")
-            file_signatures = {}
+            file_data = {
+                "module_info": extract_module_info(tree, code),
+                "signatures": {},
+            }
 
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     signature = extract_function_signature(node)
                     context = get_first_code_line(node, lines)
-                    file_signatures[node.name] = {
+
+                    # Enhanced function info
+                    decorators = [
+                        ast.unparse(dec) for dec in node.decorator_list
+                    ]
+
+                    file_data["signatures"][node.name] = {
                         "type": "function",
                         "signature": signature,
                         "context": context,
                         "is_async": isinstance(node, ast.AsyncFunctionDef),
+                        "decorators": decorators,
+                        "line_number": node.lineno,
                     }
 
                 elif isinstance(node, ast.ClassDef):
                     signature = extract_class_signature(node)
-                    # Get class methods for context
+
                     methods = []
                     for class_node in node.body:
                         if isinstance(
                             class_node,
                             (ast.FunctionDef, ast.AsyncFunctionDef),
                         ):
-                            methods.append(class_node.name)
+                            method_info = {
+                                "name": class_node.name,
+                                "is_property": any(
+                                    ast.unparse(dec) == "property"
+                                    for dec in class_node.decorator_list
+                                ),
+                                "is_static": any(
+                                    ast.unparse(dec) == "staticmethod"
+                                    for dec in class_node.decorator_list
+                                ),
+                                "is_class_method": any(
+                                    ast.unparse(dec) == "classmethod"
+                                    for dec in class_node.decorator_list
+                                ),
+                            }
+                            methods.append(method_info)
 
-                    file_signatures[node.name] = {
+                    file_data["signatures"][node.name] = {
                         "type": "class",
                         "signature": signature,
-                        "methods": methods[:3],  # First 3 methods
+                        "methods": methods,
                         "context": "",
+                        "bases": [ast.unparse(base) for base in node.bases],
+                        "line_number": node.lineno,
                     }
 
-            if file_signatures:
-                all_signatures[filename] = file_signatures
+            all_signatures[filename] = file_data
 
         except Exception as e:
             all_signatures[filename] = {"error": f"Failed to parse: {str(e)}"}
+
     return json.dumps(all_signatures, indent=2)
 
 
 # Docstring generation prompt template
 DOCSTRING_GENERATION_PROMPT = """
-Generate comprehensive Google-style docstrings for the following Python
-functions and classes.
+Generate comprehensive Google-style docstrings for Python modules, functions,
+and classes.
 
 SIGNATURE DATA:
 {signatures_data}
 
-REQUIREMENTS:
-1. Use Google-style docstring format
-2. Include brief description, Args, Returns sections
-3. For classes: include class description and key attributes
-4. Be specific about parameter types and return types
-5. Write professional, clear descriptions
-6. For functions with context, infer purpose from the first line of code
+DOCSTRING FORMAT REQUIREMENTS:
+
+1. MODULE DOCSTRINGS:
+   - Brief one-line summary
+   - Detailed description of module purpose
+   - List key classes/functions if applicable
+   - Usage examples for complex modules
+   - Author/Version info if appropriate
+
+2. FUNCTION DOCSTRINGS:
+   Format:
+   '''Brief one-line description.
+
+   Detailed description explaining the function's purpose, behavior,
+   and any important implementation details.
+
+   Args:
+       param_name (type): Description of parameter. Use proper type hints
+           from the signature. For complex types, be specific.
+       another_param (Optional[str]): Description for optional parameters.
+
+   Returns:
+       return_type: Description of return value. Be specific about the
+           type and structure of returned data.
+
+   Raises:
+       ExceptionType: Description of when this exception is raised.
+       AnotherException: Description of another potential exception.
+
+   Example:
+       Basic usage example:
+
+       >>> result = function_name(param1, param2)
+       >>> print(result)
+       Expected output
+
+   Note:
+       Any additional notes, warnings, or important information.
+   '''
+
+3. CLASS DOCSTRINGS:
+   Format:
+   '''Brief one-line description of the class.
+
+   Detailed description of the class purpose, its role in the system,
+   and how it should be used.
+
+   Attributes:
+       attr_name (type): Description of public attributes.
+       another_attr (type): Description of another attribute.
+
+   Example:
+       Basic usage:
+
+       >>> obj = ClassName(param1, param2)
+       >>> obj.method_name()
+       Expected result
+
+   Note:
+       Any important notes about usage, thread safety, etc.
+   '''
+
+4. SPECIFIC FORMATTING RULES:
+   - Use triple single quotes '''
+   - First line: Brief summary ending with period
+   - Second line: Empty
+   - Third line onward: Detailed description
+   - Args section: One line per parameter
+   - Returns section: Describe type and content
+   - Include Examples section when helpful
+   - Include Raises section for exceptions
+   - Use proper indentation (4 spaces for content)
 
 RESPONSE FORMAT:
-Return ONLY a JSON object with this exact structure:
+Return ONLY a JSON object with this structure:
 {{
   "filename.py": {{
-    "function_or_class_name":
-        "Complete docstring content here including triple quotes",
-    "another_function":
-        "Another complete docstring..."
-  }},
-  "another_file.py": {{
-    "function_name": "Docstring content..."
+    "module": "Module docstring with triple quotes",
+    "function_or_class_name": "Function/class docstring with triple quotes",
+    "another_function": "Another docstring..."
   }}
 }}
 
 IMPORTANT:
-- Include the triple quotes in the docstring content
-- Do not include any text outside the JSON structure
-- Ensure all JSON is valid and properly escaped
-- Generate docstrings for ALL functions and classes provided
+- Generate module docstrings for ALL files
+- Include triple quotes in ALL docstring content
+- Use information from module_info and signatures
+- Be specific about types from function signatures
+- No text outside JSON structure
+- Escape quotes properly in JSON
+- Generate docstrings for ALL functions, classes, and modules
 """
 
 
@@ -462,15 +601,16 @@ def generate_docstrings_prompt(signatures_data: str) -> str:
 
 @mcp.tool()
 def apply_docstrings_batch(docstrings_json: str) -> str:
-    """Apply generated docstrings to all processed files.
+    """Apply generated docstrings to all processed files including modules.
 
     This function takes the JSON response from the LLM containing docstrings
-    and applies them to the appropriate functions and classes in the processed
-    files. It handles proper indentation and insertion of docstrings.
+    and applies them to the appropriate functions, classes, and modules in the
+    processed files.
+    It handles proper indentation and insertion of docstrings.
 
     Args:
-        docstrings_json (str):
-            JSON string containing docstrings for each file/function
+        docstrings_json (str): JSON string containing docstrings for each
+            file/function/class/module
 
     Returns:
         str: Status report of docstring application results
@@ -502,20 +642,52 @@ def apply_docstrings_batch(docstrings_json: str) -> str:
             with open(file_path, "r", encoding="utf-8") as file:
                 code = file.read()
 
-            # Parse the AST to find function/class locations
             tree = ast.parse(code)
             lines = code.split("\n")
-
-            # Apply docstrings in reverse order to maintain line numbers
             insertions = []
 
+            # Handle module docstring
+            if "module" in docstrings:
+                module_docstring = docstrings["module"]
+                docstring_lines = module_docstring.split("\n")
+
+                insert_line = 0
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith((
+                        "#",
+                        "import ",
+                        "from ",
+                    )):
+                        continue
+                    insert_line = i
+                    break
+
+                # Add empty line before docstring if needed
+                if insert_line > 0 and lines[insert_line - 1].strip():
+                    insertions.append({"line": insert_line, "content": [""]})
+                    insert_line += 1
+
+                # Add module docstring
+                indented_docstring = [line for line in docstring_lines]
+                insertions.append({
+                    "line": insert_line,
+                    "content": indented_docstring,
+                })
+
+                # Add empty line after docstring
+                insertions.append({
+                    "line": insert_line + len(indented_docstring),
+                    "content": [""],
+                })
+
+            # Handle function and class docstrings (existing logic)
             for node in ast.walk(tree):
                 if isinstance(
                     node,
                     (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
                 ):
                     if node.name in docstrings:
-                        # Find the line after the function/class definition
                         def_line = node.lineno - 1
                         insert_line = def_line + 1
 
@@ -551,7 +723,7 @@ def apply_docstrings_batch(docstrings_json: str) -> str:
                             "content": indented_docstring,
                         })
 
-            # Sort insertions in reverse order
+            # Sort insertions in reverse order to maintain line numbers
             insertions.sort(key=lambda x: x["line"], reverse=True)
 
             # Apply insertions
