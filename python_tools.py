@@ -501,37 +501,32 @@ DOCSTRING FORMAT REQUIREMENTS:
    - Detailed description of module purpose
    - List key classes/functions if applicable
    - Usage examples for complex modules
-   - Author/Version info if appropriate
+   - Don't exceed 79 characters per line
 
 2. FUNCTION DOCSTRINGS:
    Format:
-   '''Brief one-line description.
+   '''Brief one-line description on maximum 79 characters.
 
    Detailed description explaining the function's purpose, behavior,
    and any important implementation details.
 
    Args:
-       param_name (type): Description of parameter. Use proper type hints
-           from the signature. For complex types, be specific.
-       another_param (Optional[str]): Description for optional parameters.
+       param_name (type):
+            Description of parameter.
+            Use proper type hints from the signature.
+            For complex types, be specific.
+       another_param (Optional[str]):
+            Description for optional parameters.
 
    Returns:
-       return_type: Description of return value. Be specific about the
-           type and structure of returned data.
+       return_type:
+            Description of return value. Be specific about the type and
+            structure of returned data.
 
    Raises:
        ExceptionType: Description of when this exception is raised.
        AnotherException: Description of another potential exception.
 
-   Example:
-       Basic usage example:
-
-       >>> result = function_name(param1, param2)
-       >>> print(result)
-       Expected output
-
-   Note:
-       Any additional notes, warnings, or important information.
    '''
 
 3. CLASS DOCSTRINGS:
@@ -545,27 +540,23 @@ DOCSTRING FORMAT REQUIREMENTS:
        attr_name (type): Description of public attributes.
        another_attr (type): Description of another attribute.
 
-   Example:
-       Basic usage:
-
-       >>> obj = ClassName(param1, param2)
-       >>> obj.method_name()
-       Expected result
-
-   Note:
-       Any important notes about usage, thread safety, etc.
    '''
 
 4. SPECIFIC FORMATTING RULES:
    - Use triple single quotes '''
    - First line: Brief summary ending with period
    - Second line: Empty
+   - Last line: Empty
    - Third line onward: Detailed description
    - Args section: One line per parameter
    - Returns section: Describe type and content
    - Include Examples section when helpful
    - Include Raises section for exceptions
    - Use proper indentation (4 spaces for content)
+   - Don't exceed 78 characters per line
+   - Make sure that the module docstring is at the top,
+   before any imports or code.
+   - Remove whitespaces at the end of the lines
 
 RESPONSE FORMAT:
 Return ONLY a JSON object with this structure:
