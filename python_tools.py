@@ -328,3 +328,30 @@ def save_processed_file(filename: str, content: str) -> str:
         )
     except Exception as e:
         return f"Error saving '{filename}': {str(e)}"
+
+
+@mcp.prompt()
+def generate_docstrings(filename: str) -> str:
+    """
+    Generate a prompt for adding or updating docstrings in Python code.
+
+    This prompt requests the AI to generate missing docstrings or update
+    existing ones in a Python file, following standard conventions.
+
+    Args:
+        filename (str): The name of the file to add/update docstrings for
+    """
+
+    return f"""
+    Please add missing docstrings or update existing docstrings in the Python
+    file '{filename}'.
+
+For each function, class, and module:
+- Add comprehensive docstrings following Google style
+- Include parameter descriptions with types
+- Include return value descriptions
+- Add example usage where helpful
+- Keep docstrings concise but informative
+- Avoid long lines over 79 chars
+
+Return the complete Python code with all docstrings added/updated."""
