@@ -279,3 +279,52 @@ def list_processed_files() -> str:
     return "Processed Python files found:\n" + "\n".join(
         f"- {name}" for name in file_names
     )
+
+
+@mcp.tool()
+def save_processed_file(filename: str, content: str) -> str:
+    """Save content to a Python file in the output directory.
+
+    This function allows you to save modified or new content to a Python file
+    in the output directory. This is useful for saving edited versions of
+    processed files or creating new files based on analysis results.
+    The function will validate that the filename has a .py extension and
+    create the output directory if it doesn't exist.
+
+    Args:
+        filename (str): The name of the Python file to save.
+        content (str): The Python code content to save to the file.
+
+    Returns:
+        str:
+            A success message indicating the file was saved successfully,
+            or an error message if the operation failed.
+    """
+    ensure_directories_exist()
+
+    if not filename.endswith(".py"):
+        return (
+            f"Error: '{filename}' is not a Python file. "
+            "Only .py files are supported."
+        )
+
+    output_path = os.path.join(OUTPUT_DIR, filename)
+
+    try:
+        # Validate that the content is valid Python syntax
+        ast.parse(content)
+
+        with open(output_path, "w", encoding="utf-8") as file:
+            file.write(content)
+
+        return (
+            f"Successfully saved '{filename}' to the {OUTPUT_DIR} directory."
+        )
+
+    except SyntaxError as e:
+        return (
+            f"Error: Invalid Python syntax in content for '{filename}'. "
+            f"Syntax error: {str(e)}"
+        )
+    except Exception as e:
+        return f"Error saving '{filename}': {str(e)}"
