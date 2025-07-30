@@ -1,6 +1,7 @@
 import ast
 import glob
 import os
+import subprocess
 import tokenize
 from io import StringIO
 
@@ -352,6 +353,154 @@ For each function, class, and module:
 - Include return value descriptions
 - Add example usage where helpful
 - Keep docstrings concise but informative
-- Avoid long lines over 79 chars
 
 Return the complete Python code with all docstrings added/updated."""
+
+
+@mcp.tool()
+def run_ruff_check(filename: str) -> str:
+    """Run ruff check on a single processed Python file.
+
+    This function runs ruff linting and formatting checks on a processed
+    Python file in the output directory. It's useful for validating code
+    quality after docstring generation or other modifications.
+    The function will check for style violations, syntax issues, and
+    formatting problems.
+
+    Args:
+        filename (str): The name of the Python file to check with ruff.
+
+    Returns:
+        str:
+            The ruff check output showing any issues found, or a success
+            message if no issues are detected. Returns an error message
+            if the operation failed.
+    """
+    ensure_directories_exist()
+
+    if not filename.endswith(".py"):
+        return (
+            f"Error: '{filename}' is not a Python file. "
+            "Only .py files are supported."
+        )
+
+    # Check if file exists in output directory
+    output_path = os.path.join(OUTPUT_DIR, filename)
+
+    # If not in output dir, check current directory
+    if not os.path.exists(output_path):
+        current_dir_path = os.path.join(os.getcwd(), filename)
+        if os.path.exists(current_dir_path):
+            file_path = current_dir_path
+        else:
+            return (
+                f"File '{filename}' not found in either "
+                f"{OUTPUT_DIR} or current directory."
+            )
+    else:
+        file_path = output_path
+
+    try:
+        # Try multiple ways to find and run ruff
+        commands_to_try = [
+            [
+                "uv",
+                "run",
+                "ruff",
+                "check",
+                "--show-settings",
+                file_path,
+            ],  # If ruff in deps
+            [
+                "ruff",
+                "check",
+                "--show-settings",
+                file_path,
+            ],  # If ruff in PATH
+        ]
+
+        # Try to find ruff in common venv locations
+        possible_venv_paths = [
+            os.path.join(os.getcwd(), ".venv", "bin", "ruff"),  # Unix
+            os.path.join(os.getcwd(), ".venv", "Scripts", "ruff.exe"),  # Win
+            os.path.join(os.getcwd(), "venv", "bin", "ruff"),  # Unix
+            os.path.join(os.getcwd(), "venv", "Scripts", "ruff.exe"),  # Win
+        ]
+
+        for venv_ruff in possible_venv_paths:
+            if os.path.exists(venv_ruff):
+                commands_to_try.append([venv_ruff, "check", file_path])
+
+        result = None
+        command_used = None
+
+        for cmd in commands_to_try:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=os.getcwd(),
+                )
+                command_used = " ".join(cmd)
+                break
+            except (FileNotFoundError, PermissionError):
+                continue
+
+        if result is None:
+            return (
+                "Error: Ruff not found. Try one of these:\n"
+                "1. uv add ruff --dev (recommended)\n"
+                "2. Activate your venv before running MCP server\n"
+                "3. uv tool install ruff (global install)"
+            )
+
+        # Prepare output content
+        output = result.stdout + result.stderr
+        timestamp = (
+            __import__("datetime")
+            .datetime.now()
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+        # Create ruff output filename
+        base_name = filename.replace(".py", "")
+        ruff_output_filename = f"{base_name}_ruff_output.txt"
+        ruff_output_path = os.path.join(OUTPUT_DIR, ruff_output_filename)
+
+        # Save ruff output to file
+        with open(ruff_output_path, "w", encoding="utf-8") as f:
+            f.write(f"Ruff check output for '{filename}'\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write(f"Command: {command_used}\n")
+            f.write(f"Return code: {result.returncode}\n")
+            f.write("-" * 50 + "\n\n")
+            if output.strip():
+                f.write(output.strip())
+            else:
+                f.write("No issues found.")
+
+        if result.returncode == 0:
+            return (
+                f"✅ Ruff check passed for '{filename}' - no issues found.\n"
+                f"Command used: {command_used}\n"
+                f"Output saved to: {ruff_output_filename}"
+            )
+        else:
+            return (
+                f"Ruff check results for '{filename}':\n\n"
+                f"{output.strip()}\n\n"
+                f"Command used: {command_used}\n"
+                f"Full output saved to: {ruff_output_filename}"
+            )
+
+    except subprocess.TimeoutExpired:
+        return f"Error: Ruff check timed out for '{filename}'."
+    except FileNotFoundError:
+        return (
+            "Error: uv is not installed or not found in PATH. "
+            "Please install uv or ensure it's available."
+        )
+    except Exception as e:
+        return f"Error running ruff check on '{filename}': {str(e)}"
