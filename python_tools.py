@@ -331,6 +331,20 @@ def save_processed_file(filename: str, content: str) -> str:
         return f"Error saving '{filename}': {str(e)}"
 
 
+PROMPT_TEMPLATE = """
+Please add missing docstrings or update existing docstrings in the Python
+file '{filename}'.
+
+For each function, class, and module:
+- Add docstrings following Google style
+- Include parameter descriptions with types ('Args:')
+- Include return value descriptions ('Returns:)
+- Exclude the 'Example:', 'Side Effects:' or 'Note:' sections
+- Keep docstrings concise but informative
+
+Return the complete Python code with all docstrings added/updated."""
+
+
 @mcp.prompt()
 def generate_docstrings(filename: str) -> str:
     """
@@ -343,18 +357,7 @@ def generate_docstrings(filename: str) -> str:
         filename (str): The name of the file to add/update docstrings for
     """
 
-    return f"""
-    Please add missing docstrings or update existing docstrings in the Python
-    file '{filename}'.
-
-For each function, class, and module:
-- Add comprehensive docstrings following Google style
-- Include parameter descriptions with types
-- Include return value descriptions
-- Add example usage where helpful
-- Keep docstrings concise but informative
-
-Return the complete Python code with all docstrings added/updated."""
+    return PROMPT_TEMPLATE.format(filename=filename)
 
 
 @mcp.tool()
