@@ -331,35 +331,6 @@ def save_processed_file(filename: str, content: str) -> str:
         return f"Error saving '{filename}': {str(e)}"
 
 
-PROMPT_TEMPLATE = """
-Please add missing docstrings or update existing docstrings in the Python
-file '{filename}'.
-
-For each function, class, and module:
-- Add docstrings following Google style
-- Include parameter descriptions with types ('Args:')
-- Include return value descriptions ('Returns:)
-- Exclude the 'Example:', 'Side Effects:' or 'Note:' sections
-- Keep docstrings concise but informative
-
-Return the complete Python code with all docstrings added/updated."""
-
-
-@mcp.prompt()
-def generate_docstrings(filename: str) -> str:
-    """
-    Generate a prompt for adding or updating docstrings in Python code.
-
-    This prompt requests the AI to generate missing docstrings or update
-    existing ones in a Python file, following standard conventions.
-
-    Args:
-        filename (str): The name of the file to add/update docstrings for
-    """
-
-    return PROMPT_TEMPLATE.format(filename=filename)
-
-
 @mcp.tool()
 def run_ruff_check(filename: str) -> str:
     """Run ruff check on a single processed Python file.
